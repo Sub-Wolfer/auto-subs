@@ -732,8 +732,14 @@ Immediately after the `ListCaptions` branch added in Task 4:
 
 ```lua
                             elseif data.func == "SnapshotCaptions" then
-                                body = SnapshotCaptions(data.trackIndices)
+                                print("[AutoSubs Server] Snapshotting captions...")
+                                local snapshotResult = SnapshotCaptions(data.trackIndices)
+                                body = safe_json(snapshotResult)
 ```
+
+Every branch in this chain assigns `body = safe_json(...)`, never a raw table —
+`create_response` takes the length of `body` and concatenates it as a string, so
+assigning a table crashes on the first call.
 
 - [ ] **Step 3: Verify against a real timeline (manual)**
 
@@ -826,9 +832,13 @@ end
 
 ```lua
                             elseif data.func == "RestyleSubtitles" then
-                                body = RestyleSubtitles(data.trackIndices, data.macroSettings,
-                                    data.resolvedColors)
+                                print("[AutoSubs Server] Restyling captions...")
+                                local restyleResult = RestyleSubtitles(data.trackIndices,
+                                    data.macroSettings, data.resolvedColors)
+                                body = safe_json(restyleResult)
 ```
+
+`body` must always be the result of `safe_json(...)`, never a raw table.
 
 - [ ] **Step 3: Verify against a real timeline (manual)**
 
@@ -954,10 +964,16 @@ end
 
 ```lua
                             elseif data.func == "RestoreSnapshot" then
-                                body = RestoreSnapshot(data.captions)
+                                print("[AutoSubs Server] Restoring caption snapshot...")
+                                local restoreResult = RestoreSnapshot(data.captions)
+                                body = safe_json(restoreResult)
                             elseif data.func == "RemoveAllSubtitles" then
-                                body = RemoveAllSubtitles(data.trackIndices)
+                                print("[AutoSubs Server] Removing captions...")
+                                local removeResult = RemoveAllSubtitles(data.trackIndices)
+                                body = safe_json(removeResult)
 ```
+
+`body` must always be the result of `safe_json(...)`, never a raw table.
 
 - [ ] **Step 3: Verify restore round-trips (manual)**
 
