@@ -1630,7 +1630,28 @@ function SnapshotCaptions(trackIndices)
             if not getter or getter == "" then
                 error("macro is missing GetInputValues helper")
             end
-            local settings = loadstring(getter)()(entry.autosubsTool)
+            local settings = loadstring(getter)()(entry.autosubsTool) or {}
+
+            -- GetInputValues walks the caption's *baked* InputKeys list, so on
+            -- a caption whose macro predates the published layout inputs it
+            -- cannot see them -- exactly the captions RestyleSubtitles' own
+            -- fallback writes those keys to the inner Text+ for. Without the
+            -- mirror image here the snapshot would carry no layout values, and
+            -- restore (whose matching fallback only writes keys the snapshot
+            -- actually holds) could never undo the layout change. Same probe,
+            -- same guard, as RestyleSubtitles -- keep the two in lockstep.
+            local probeOk, wrapInput = pcall(function()
+                return entry.autosubsTool:GetInput("Wrap")
+            end)
+            local macroPublishesLayout = probeOk and wrapInput ~= nil
+            if entry.template and not macroPublishesLayout then
+                for _, key in ipairs(LAYOUT_INPUT_KEYS) do
+                    -- Only what the comp actually has; never invent a default,
+                    -- or restore would push a value this caption never held.
+                    local layoutValue = entry.template:GetInput(key)
+                    if layoutValue ~= nil then settings[key] = layoutValue end
+                end
+            end
 
             local text = ""
             if entry.template then
@@ -1644,7 +1665,7 @@ function SnapshotCaptions(trackIndices)
                 startFrame = entry.item:GetStart(),
                 endFrame = entry.item:GetEnd(),
                 text = text,
-                macroSettings = settings or {},
+                macroSettings = settings,
             })
         end)
         if not ok then
