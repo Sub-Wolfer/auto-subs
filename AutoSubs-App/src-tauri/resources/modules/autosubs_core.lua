@@ -1424,6 +1424,18 @@ end
 -- "AutoSubs". Clip names are user-editable and must never be used.
 ------------------------------------------------------------------------
 
+-- Seed math.random once, here at module load, with more entropy than the
+-- 1-second-granularity os.time() alone provides. Without this, a fresh
+-- LuaJIT state (i.e. every time Resolve (re)starts and this file is
+-- reloaded) replays the exact same math.random() sequence, so caption ids
+-- stamped in one session could collide with ids stamped in another --
+-- and RestoreSnapshot relies on CaptionId being unique to tell captions
+-- apart. os.clock() (process CPU time so far) and the ASLR-influenced
+-- address of a throwaway table both vary per run independently of the
+-- wall clock, so mixing them in closes that gap.
+math.randomseed(os.time() + math.floor(os.clock() * 1e6) +
+    (tonumber(tostring({}):match("%x+$") or "0", 16) or 0))
+
 local function new_caption_uuid()
     local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
     return (template:gsub("[xy]", function(c)
@@ -1445,6 +1457,11 @@ end
 
 -- Walk the requested video tracks and yield every AutoSubs caption found.
 -- trackIndices may be nil (all video tracks) or an array of 1-based indices.
+-- Returns the found captions, plus a count of items that looked like they
+-- might be a caption but errored while being read, and the first such
+-- error. Mirrors apply_subtitle_text's failure tally so a caller can tell
+-- a short-but-complete list from a partly-broken scan. A failing item
+-- never aborts the scan.
 local function iter_caption_items(timeline, trackIndices)
     local wanted = nil
     if trackIndices ~= nil and #trackIndices > 0 then
@@ -1455,6 +1472,8 @@ local function iter_caption_items(timeline, trackIndices)
     end
 
     local found = {}
+    local failed = 0
+    local firstError = nil
     local trackCount = timeline:GetTrackCount("video")
     for trackIndex = 1, trackCount do
         if wanted == nil or wanted[trackIndex] then
@@ -1477,11 +1496,14 @@ local function iter_caption_items(timeline, trackIndices)
                 end)
                 if ok and entry ~= nil then
                     table.insert(found, entry)
+                elseif not ok then
+                    failed = failed + 1
+                    if firstError == nil then firstError = tostring(entry) end
                 end
             end
         end
     end
-    return found
+    return found, failed, firstError
 end
 
 function ListCaptions(trackIndices)
@@ -1491,8 +1513,10 @@ function ListCaptions(trackIndices)
         return make_error("No timeline", "no current timeline is open")
     end
 
+    local items, failed, firstError = iter_caption_items(timeline, trackIndices)
+
     local captions = {}
-    for _, entry in ipairs(iter_caption_items(timeline, trackIndices)) do
+    for _, entry in ipairs(items) do
         local text = ""
         if entry.template then
             local ok, value = pcall(function() return entry.template:GetInput("Text") end)
@@ -1506,7 +1530,12 @@ function ListCaptions(trackIndices)
             text = text,
         })
     end
-    return { captions = captions }
+    return {
+        captions = captions,
+        failed = failed,
+        total = #captions + failed,
+        firstError = firstError,
+    }
 end
 
 -- Applies subtitle text + styling to each appended timeline item. Instead of
