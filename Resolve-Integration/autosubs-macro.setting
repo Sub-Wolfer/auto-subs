@@ -20,6 +20,10 @@
 					"Style",
 					"TextSize",
 					"TextPosition",
+					"Wrap",
+					"LayoutType",
+					"LayoutWidth",
+					"LayoutHeight",
 					"FadeEnabled",
 					"PopInEnabled",
 					"SlideUpEnabled",
@@ -1873,6 +1877,26 @@
 					SourceOp = "Template",
 					Source = "Style",
 					ControlGroup = 4,
+					Page = "Text",
+				},
+				Wrap = InstanceInput {
+					SourceOp = "Template",
+					Source = "Wrap",
+					Page = "Text",
+				},
+				LayoutType = InstanceInput {
+					SourceOp = "Template",
+					Source = "LayoutType",
+					Page = "Text",
+				},
+				LayoutWidth = InstanceInput {
+					SourceOp = "Template",
+					Source = "LayoutWidth",
+					Page = "Text",
+				},
+				LayoutHeight = InstanceInput {
+					SourceOp = "Template",
+					Source = "LayoutHeight",
 					Page = "Text",
 				},
 				TextSize = InstanceInput {
