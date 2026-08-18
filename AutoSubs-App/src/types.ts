@@ -273,3 +273,28 @@ export interface BackendSegment {
         probability?: number,
     }>,
 }
+
+export interface ColorRules {
+    trackColors?: Record<number, string>;
+    captionOverrides?: Record<string, string>;
+}
+
+export interface TimelineCaption {
+    captionId: string;
+    trackIndex: number;
+    startFrame: number;
+    endFrame: number;
+    text: string;
+}
+
+export interface CaptionSnapshot extends TimelineCaption {
+    macroSettings: Record<string, unknown>;
+}
+
+export interface SnapshotEntry {
+    id: string;
+    label: string;
+    createdAt: string;
+    operation: 'restyle' | 'generate' | 'remove-all';
+    captions: CaptionSnapshot[];
+}
