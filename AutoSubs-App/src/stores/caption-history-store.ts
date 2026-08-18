@@ -2,11 +2,15 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createTauriStorage, flushTauriStorage } from '@/lib/tauri-storage';
 import { SnapshotEntry } from '@/types';
-import { pruneHistory } from '@/lib/caption-snapshots';
+import { pruneHistory, pruneKeys } from '@/lib/caption-snapshots';
 
 const STORE_FILE = 'autosubs-caption-history.json';
 const STORE_KEY = 'history';
 const MAX_ENTRIES_PER_TIMELINE = 10;
+// Every project/timeline ever touched would otherwise keep a key forever, in
+// one JSON file, each holding full macro settings for every caption. Ten
+// timelines' worth of history is far more than the panel can surface.
+const MAX_TIMELINES = 10;
 
 interface CaptionHistoryStore {
     entriesByKey: Record<string, SnapshotEntry[]>;
@@ -26,13 +30,19 @@ export const useCaptionHistoryStore = create<CaptionHistoryStore>()(
             isHydrated: false,
             addEntry: (key, entry) =>
                 set((state) => ({
-                    entriesByKey: {
-                        ...state.entriesByKey,
-                        [key]: pruneHistory(
-                            [entry, ...(state.entriesByKey[key] ?? [])],
-                            MAX_ENTRIES_PER_TIMELINE,
-                        ),
-                    },
+                    // Bounded twice over: entries within a timeline, and the
+                    // number of timelines. The key being written is the most
+                    // recently updated one, so it always survives eviction.
+                    entriesByKey: pruneKeys(
+                        {
+                            ...state.entriesByKey,
+                            [key]: pruneHistory(
+                                [entry, ...(state.entriesByKey[key] ?? [])],
+                                MAX_ENTRIES_PER_TIMELINE,
+                            ),
+                        },
+                        MAX_TIMELINES,
+                    ),
                 })),
             removeEntry: (key, entryId) =>
                 set((state) => ({

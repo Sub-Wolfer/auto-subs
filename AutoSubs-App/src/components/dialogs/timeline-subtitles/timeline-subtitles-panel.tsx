@@ -306,6 +306,16 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
         [refresh, persistEntry],
     );
 
+    // Dropping a snapshot touches nothing in Resolve, so it doesn't go
+    // through persistEntry's flush-and-refuse dance; the write is best-effort
+    // and a failure is logged by the storage adapter.
+    const handleDelete = useCallback(
+        (entry: SnapshotEntry) => {
+            removeEntry(key, entry.id);
+        },
+        [key, removeEntry],
+    );
+
     return (
         <div className="space-y-6 p-4">
             <section className="space-y-2">
@@ -367,7 +377,12 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
 
             <section className="space-y-2">
                 <h3 className="text-sm font-semibold">History</h3>
-                <SnapshotHistoryList entries={entries} onRestore={handleRestore} busy={busy} />
+                <SnapshotHistoryList
+                    entries={entries}
+                    onRestore={handleRestore}
+                    onDelete={handleDelete}
+                    busy={busy}
+                />
             </section>
 
             {status && (

@@ -4,6 +4,7 @@ import {
     pruneHistory,
     historyKey,
     shouldRestoreText,
+    pruneKeys,
 } from './caption-snapshots';
 import { CaptionSnapshot, SnapshotEntry } from '@/types';
 
@@ -60,6 +61,44 @@ describe('pruneHistory', () => {
 
     it('never returns more than max', () => {
         expect(pruneHistory(entries, 0)).toHaveLength(0);
+    });
+});
+
+describe('pruneKeys', () => {
+    const entryAt = (createdAt: string): SnapshotEntry => ({
+        id: `id-${createdAt}`,
+        label: 'entry',
+        createdAt,
+        operation: 'restyle',
+        captions: [],
+    });
+
+    const byKey = {
+        old: [entryAt('2026-08-01T00:00:00.000Z')],
+        middle: [entryAt('2026-08-05T00:00:00.000Z')],
+        newest: [entryAt('2026-08-09T00:00:00.000Z'), entryAt('2026-08-02T00:00:00.000Z')],
+    };
+
+    it('keeps everything when under the cap', () => {
+        expect(pruneKeys(byKey, 3)).toBe(byKey);
+    });
+
+    it('evicts the least recently updated timelines', () => {
+        expect(Object.keys(pruneKeys(byKey, 2)).sort()).toEqual(['middle', 'newest']);
+    });
+
+    it('ranks a key by its newest entry, not its oldest', () => {
+        // `newest` also holds an entry older than every entry in `old`.
+        expect(Object.keys(pruneKeys(byKey, 1))).toEqual(['newest']);
+    });
+
+    it('evicts keys with no entries first', () => {
+        const withEmpty = { ...byKey, empty: [] };
+        expect(Object.keys(pruneKeys(withEmpty, 3)).sort()).toEqual([
+            'middle',
+            'newest',
+            'old',
+        ]);
     });
 });
 

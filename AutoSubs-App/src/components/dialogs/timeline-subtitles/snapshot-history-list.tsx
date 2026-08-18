@@ -1,20 +1,27 @@
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SnapshotEntry } from "@/types";
 
 interface SnapshotHistoryListProps {
     entries: SnapshotEntry[];
     onRestore: (entry: SnapshotEntry) => void;
+    onDelete: (entry: SnapshotEntry) => void;
     busy: boolean;
 }
 
 /**
  * Newest-first list of caption snapshots for the current timeline (see
  * `useCaptionHistoryStore`). Restoring re-applies a snapshot's captured
- * macro settings via `restoreSnapshot` — this component only reports the
- * click, `TimelineSubtitlesPanel` owns the actual API call.
+ * macro settings via `restoreSnapshot`; deleting drops the entry from
+ * history — this component only reports the click, `TimelineSubtitlesPanel`
+ * owns the actual API call and the store write.
  */
-export function SnapshotHistoryList({ entries, onRestore, busy }: SnapshotHistoryListProps) {
+export function SnapshotHistoryList({
+    entries,
+    onRestore,
+    onDelete,
+    busy,
+}: SnapshotHistoryListProps) {
     if (entries.length === 0) {
         return <p className="py-4 text-sm text-muted-foreground">No snapshots yet.</p>;
     }
@@ -38,6 +45,17 @@ export function SnapshotHistoryList({ entries, onRestore, busy }: SnapshotHistor
                     >
                         <RotateCcw />
                         Restore
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy}
+                        aria-label={`Delete snapshot: ${entry.label}`}
+                        title="Delete this snapshot"
+                        onClick={() => onDelete(entry)}
+                    >
+                        <Trash2 className="size-4" />
                     </Button>
                 </li>
             ))}
