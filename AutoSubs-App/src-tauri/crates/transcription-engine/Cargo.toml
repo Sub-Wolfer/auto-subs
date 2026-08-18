@@ -43,7 +43,12 @@ vulkan = ["whisper-rs/vulkan"]
 # Platform/arch presets
 mac-aarch = ["coreml", "metal"]
 mac-x86_64 = ["metal", "diarize/load-dynamic", "load-dynamic"]
-windows = ["vulkan", "directml"]  # Whisper GPU via Vulkan + Pyannote via DirectML (requires Vulkan SDK: https://vulkan.lunarg.com)
+# LOCAL BUILD WORKAROUND -- not for upstream. ONNX Runtime's prebuilt ort_sys
+# is compiled against the VS 2022 STL, so static linking on a VS 2019 toolset
+# fails with ~39 unresolved __std_* symbols (LNK1120). load-dynamic makes ort
+# load onnxruntime at runtime instead, sidestepping the mismatch. This mirrors
+# what the mac-x86_64 preset already does.
+windows = ["vulkan", "directml", "diarize/load-dynamic", "load-dynamic"]  # Whisper GPU via Vulkan + Pyannote via DirectML (requires Vulkan SDK: https://vulkan.lunarg.com)
 linux = ["vulkan"]
 
 # Note: Had issues with OpenBLAS + Vulkan, so removed OpenBLAS
