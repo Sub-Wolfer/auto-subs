@@ -77,6 +77,11 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
     const entries = useCaptionHistoryStore((s) => s.entriesByKey[key] ?? []);
     const addEntry = useCaptionHistoryStore((s) => s.addEntry);
     const removeEntry = useCaptionHistoryStore((s) => s.removeEntry);
+    // Until this flips, `entries` is empty because nothing has been loaded
+    // yet — not because there are no snapshots. Treat it as busy so the panel
+    // never offers Restore against a history it hasn't read, or invites a
+    // restyle whose undo entry would land in a store that is still loading.
+    const historyHydrated = useCaptionHistoryStore((s) => s.isHydrated);
 
     // The history store hydrates manually (skipHydration), so kick it off on
     // mount to populate the list. Both mutating handlers also await the same
@@ -372,7 +377,12 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                 </div>
                 <Button
                     type="button"
-                    disabled={busy || captions.length === 0 || selectedTracks.length === 0}
+                    disabled={
+                        busy ||
+                        !historyHydrated ||
+                        captions.length === 0 ||
+                        selectedTracks.length === 0
+                    }
                     onClick={handleRestyle}
                 >
                     {busy && <Loader2 className="animate-spin" />}
@@ -386,7 +396,7 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                     entries={entries}
                     onRestore={handleRestore}
                     onDelete={handleDelete}
-                    busy={busy}
+                    busy={busy || !historyHydrated}
                 />
             </section>
 
