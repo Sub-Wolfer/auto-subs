@@ -1455,7 +1455,13 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
 
     const refresh = useCallback(async () => {
         try {
-            setCaptions(await listCaptions());
+            // listCaptions returns { captions, failed, total, firstError } —
+            // not a bare array. `failed` counts captions that could not be read.
+            const res = await listCaptions();
+            setCaptions(res.captions);
+            if (res.failed > 0) {
+                setStatus(`${res.failed} caption(s) could not be read: ${res.firstError ?? 'unknown error'}`);
+            }
         } catch (err) {
             setStatus(`Could not read timeline: ${String(err)}`);
         }
@@ -1482,8 +1488,18 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
         setStatus(null);
         try {
             // Snapshot BEFORE mutating. If this throws, no restyle is attempted.
+            // snapshotCaptions returns { captions, failed, total, firstError }.
             const snapshot = await snapshotCaptions(selectedTracks);
-            addEntry(key, makeSnapshotEntry('restyle', snapshot));
+            if (snapshot.failed > 0) {
+                // A short snapshot means those captions are unrecoverable if the
+                // restyle goes wrong. Refuse rather than offer a false undo.
+                setStatus(
+                    `Refusing to restyle: ${snapshot.failed} caption(s) could not be snapshotted ` +
+                    `(${snapshot.firstError ?? 'unknown error'}). Undo would not cover them.`,
+                );
+                return;
+            }
+            addEntry(key, makeSnapshotEntry('restyle', snapshot.captions));
 
             const fallback: Rgb01 = {
                 r: Number(preset.macroSettings.FillColorRed ?? 1),
@@ -1502,11 +1518,14 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                 });
             }
 
-            const res = await restyleSubtitles({
-                trackIndices: selectedTracks,
-                macroSettings: preset.macroSettings,
+            // Positional, not an options object, and macroSettings comes FIRST —
+            // it is the only required argument. This differs from the Lua
+            // argument order; see resolve-api.ts.
+            const res = await restyleSubtitles(
+                preset.macroSettings,
+                selectedTracks,
                 resolvedColors,
-            });
+            );
             setStatus(
                 res.failed > 0
                     ? `${res.restyled} restyled, ${res.failed} failed.`
