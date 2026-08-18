@@ -1417,6 +1417,98 @@ local function to_word_timing(transcript_words, frameRate, segmentStart)
     return result
 end
 
+------------------------------------------------------------------------
+-- Caption discovery and identity
+--
+-- A caption is any timeline item whose Fusion comp contains a tool named
+-- "AutoSubs". Clip names are user-editable and must never be used.
+------------------------------------------------------------------------
+
+local function new_caption_uuid()
+    local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+    return (template:gsub("[xy]", function(c)
+        local v = (c == "x") and math.random(0, 15) or math.random(8, 11)
+        return string.format("%x", v)
+    end))
+end
+
+-- Return the caption's stable id, creating and persisting one if absent.
+local function ensure_caption_id(autosubsTool)
+    local existing = autosubsTool:GetData("CaptionId")
+    if existing ~= nil and existing ~= "" then
+        return existing
+    end
+    local id = new_caption_uuid()
+    autosubsTool:SetData("CaptionId", id)
+    return id
+end
+
+-- Walk the requested video tracks and yield every AutoSubs caption found.
+-- trackIndices may be nil (all video tracks) or an array of 1-based indices.
+local function iter_caption_items(timeline, trackIndices)
+    local wanted = nil
+    if trackIndices ~= nil and #trackIndices > 0 then
+        wanted = {}
+        for _, idx in ipairs(trackIndices) do
+            wanted[tonumber(idx)] = true
+        end
+    end
+
+    local found = {}
+    local trackCount = timeline:GetTrackCount("video")
+    for trackIndex = 1, trackCount do
+        if wanted == nil or wanted[trackIndex] then
+            local items = timeline:GetItemListInTrack("video", trackIndex) or {}
+            for _, item in ipairs(items) do
+                local ok, entry = pcall(function()
+                    local count = item:GetFusionCompCount()
+                    if not count or count < 1 then return nil end
+                    local comp = item:GetFusionCompByIndex(1)
+                    if not comp then return nil end
+                    local autosubsTool = comp:FindTool("AutoSubs")
+                    if not autosubsTool then return nil end
+                    return {
+                        item = item,
+                        comp = comp,
+                        autosubsTool = autosubsTool,
+                        template = comp:FindTool("Template"),
+                        trackIndex = trackIndex,
+                    }
+                end)
+                if ok and entry ~= nil then
+                    table.insert(found, entry)
+                end
+            end
+        end
+    end
+    return found
+end
+
+function ListCaptions(trackIndices)
+    refresh_project()
+    local timeline = project:GetCurrentTimeline()
+    if not timeline then
+        return make_error("No timeline", "no current timeline is open")
+    end
+
+    local captions = {}
+    for _, entry in ipairs(iter_caption_items(timeline, trackIndices)) do
+        local text = ""
+        if entry.template then
+            local ok, value = pcall(function() return entry.template:GetInput("Text") end)
+            if ok and value ~= nil then text = value end
+        end
+        table.insert(captions, {
+            captionId = ensure_caption_id(entry.autosubsTool),
+            trackIndex = entry.trackIndex,
+            startFrame = entry.item:GetStart(),
+            endFrame = entry.item:GetEnd(),
+            text = text,
+        })
+    end
+    return { captions = captions }
+end
+
 -- Applies subtitle text + styling to each appended timeline item. Instead of
 -- spamming one print per failed clip, we aggregate failures and return a
 -- summary so the caller can surface a single clean error.
@@ -2178,6 +2270,10 @@ function StartServer()
                                 body = safe_json({ message = "Reloading server" })
                                 quitServer = true
                                 shouldReload = true
+                            elseif data.func == "ListCaptions" then
+                                print("[AutoSubs Server] Listing captions...")
+                                local captionsResult = ListCaptions(data.trackIndices)
+                                body = safe_json(captionsResult)
                             elseif data.func == "Exit" then
                                 body = safe_json({ message = "Server shutting down" })
                                 quitServer = true
