@@ -791,20 +791,24 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
 
     local restyled, failed, errors = 0, 0, {}
     for _, entry in ipairs(iter_caption_items(timeline, trackIndices)) do
-        local captionId = ensure_caption_id(entry.autosubsTool)
-
-        -- Shallow copy so a per-caption colour never leaks into the next one.
-        local settings = {}
-        for k, v in pairs(macroSettings) do settings[k] = v end
-
-        local color = resolvedColors and resolvedColors[captionId]
-        if color then
-            settings.FillColorRed = color.r
-            settings.FillColorGreen = color.g
-            settings.FillColorBlue = color.b
-        end
-
+        -- The WHOLE per-item body sits inside one pcall, including the id
+        -- stamp. ensure_caption_id calls SetData, which can throw; leaving it
+        -- outside would let one bad caption abort the entire restyle and
+        -- discard every caption already processed. Mirrors apply_subtitle_text.
         local ok, applyErr = pcall(function()
+            local captionId = ensure_caption_id(entry.autosubsTool)
+
+            -- Shallow copy so a per-caption colour never leaks into the next one.
+            local settings = {}
+            for k, v in pairs(macroSettings) do settings[k] = v end
+
+            local color = resolvedColors and resolvedColors[captionId]
+            if color then
+                settings.FillColorRed = color.r
+                settings.FillColorGreen = color.g
+                settings.FillColorBlue = color.b
+            end
+
             local setter = entry.autosubsTool:GetData("SetInputValues")
             if not setter or setter == "" then
                 error("macro is missing SetInputValues helper")
@@ -817,7 +821,7 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
         else
             failed = failed + 1
             if #errors < 10 then
-                table.insert(errors, captionId .. ": " .. tostring(applyErr))
+                table.insert(errors, tostring(applyErr))
             end
         end
     end
@@ -896,10 +900,14 @@ function RestoreSnapshot(captions)
     end
 
     -- Index live captions by id so restore is O(n), not O(n^2).
+    -- GetData can throw, so each read is guarded — one unreadable caption must
+    -- not abort the whole restore.
     local live = {}
     for _, entry in ipairs(iter_caption_items(timeline, nil)) do
-        local id = entry.autosubsTool:GetData("CaptionId")
-        if id ~= nil and id ~= "" then live[id] = entry end
+        local ok, id = pcall(function()
+            return entry.autosubsTool:GetData("CaptionId")
+        end)
+        if ok and id ~= nil and id ~= "" then live[id] = entry end
     end
 
     local restored, missing, failed, errors = 0, 0, 0, {}
