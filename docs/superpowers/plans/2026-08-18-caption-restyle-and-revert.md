@@ -475,10 +475,12 @@ Expected: `4`.
 Run:
 
 ```bash
-grep -c '"Wrap",\|"LayoutType",\|"LayoutWidth",\|"LayoutHeight",' Resolve-Integration/autosubs-macro.setting
+grep -c '^[[:space:]]*"\(Wrap\|LayoutType\|LayoutWidth\|LayoutHeight\)",$' Resolve-Integration/autosubs-macro.setting
 ```
 
-Expected: `4`.
+Expected: `4`. The pattern is anchored to a whole line on purpose — an unanchored
+`'"Wrap",\|…'` also matches the `Source = "Wrap",` lines added in Step 1 and
+returns 8, which looks like duplication when nothing is wrong.
 
 - [ ] **Step 4: Regenerate the caption template bin (manual, requires Resolve)**
 
