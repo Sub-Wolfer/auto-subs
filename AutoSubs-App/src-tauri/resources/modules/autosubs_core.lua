@@ -1436,6 +1436,13 @@ end
 math.randomseed(os.time() + math.floor(os.clock() * 1e6) +
     (tonumber(tostring({}):match("%x+$") or "0", 16) or 0))
 
+-- The four text-box layout inputs the macro publishes (see
+-- Resolve-Integration/autosubs-macro.setting). They live on the inner Text+
+-- ("Template") node and are re-published by the macro. Both routes matter:
+-- the macro is *baked into each caption's comp at generation time*, so a
+-- caption generated before those inputs were published can only receive them
+-- on the inner Text+ directly. See RestyleSubtitles.
+local LAYOUT_INPUT_KEYS = { "Wrap", "LayoutType", "LayoutWidth", "LayoutHeight" }
 local function new_caption_uuid()
     local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
     return (template:gsub("[xy]", function(c)
@@ -1666,6 +1673,34 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
                 error("macro is missing SetInputValues helper")
             end
             loadstring(setter)()(entry.comp, entry.autosubsTool, settings)
+
+            -- The macro -- including its published Inputs block -- is copied
+            -- into each timeline item's Fusion comp when the caption is
+            -- generated, so a caption placed before the layout inputs were
+            -- published carries the old macro forever. SetInput("Wrap", 1) on
+            -- such a macro is a silent no-op, which would make restyle unable
+            -- to fix the very overflow problem it exists for. Detect the old
+            -- macro and write the layout keys straight to the inner Text+
+            -- instead -- the same technique the wrapping behaviour was
+            -- verified with.
+            --
+            -- Deliberately NOT a general fallback for every setting: the other
+            -- keys must go through SetInputValues, which also rebuilds
+            -- animation keyframes and highlight state.
+            local probeOk, wrapInput = pcall(function()
+                return entry.autosubsTool:GetInput("Wrap")
+            end)
+            local macroPublishesLayout = probeOk and wrapInput ~= nil
+            if entry.template and not macroPublishesLayout then
+                for _, key in ipairs(LAYOUT_INPUT_KEYS) do
+                    -- Only keys the caller actually sent; never invent a
+                    -- default, or a preset that says nothing about layout
+                    -- would start overriding the comp's own values.
+                    if settings[key] ~= nil then
+                        entry.template:SetInput(key, settings[key])
+                    end
+                end
+            end
         end)
 
         if ok then
@@ -1717,6 +1752,21 @@ function RestoreSnapshot(captions)
                     error("macro is missing SetInputValues helper")
                 end
                 loadstring(setter)()(entry.comp, entry.autosubsTool, snapshot.macroSettings)
+
+                -- Layout keys, for captions whose baked macro predates them;
+                -- see the same block in RestyleSubtitles for why.
+                local probeOk, wrapInput = pcall(function()
+                    return entry.autosubsTool:GetInput("Wrap")
+                end)
+                if entry.template and not (probeOk and wrapInput ~= nil) then
+                    local settings = snapshot.macroSettings or {}
+                    for _, key in ipairs(LAYOUT_INPUT_KEYS) do
+                        if settings[key] ~= nil then
+                            entry.template:SetInput(key, settings[key])
+                        end
+                    end
+                end
+
                 if entry.template and snapshot.text ~= nil then
                     entry.template:SetInput("Text", snapshot.text)
                 end
