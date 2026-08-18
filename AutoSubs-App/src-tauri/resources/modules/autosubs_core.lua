@@ -1443,6 +1443,42 @@ math.randomseed(os.time() + math.floor(os.clock() * 1e6) +
 -- caption generated before those inputs were published can only receive them
 -- on the inner Text+ directly. See RestyleSubtitles.
 local LAYOUT_INPUT_KEYS = { "Wrap", "LayoutType", "LayoutWidth", "LayoutHeight" }
+
+-- Temporarily unlock the given video tracks (a set keyed by track index) so
+-- mutating calls aren't silently refused, returning the set that was actually
+-- unlocked so the caller can restore it with relock_tracks. Resolve's
+-- DeleteClips returns false rather than throwing on a locked track, and
+-- SetInput/SetData writes can be dropped outright, so without this a bulk
+-- operation reports success it did not achieve. Mirrors the dance AddSubtitles
+-- already performs before AppendToTimeline.
+local function unlock_tracks(timeline, trackSet)
+    local lockedTracks = {}
+    if not (timeline.GetIsTrackLocked and timeline.SetTrackLock) then
+        return lockedTracks
+    end
+    for trackIndex in pairs(trackSet) do
+        local isLocked = false
+        pcall(function()
+            isLocked = timeline:GetIsTrackLocked("video", trackIndex) or false
+        end)
+        if isLocked then
+            pcall(timeline.SetTrackLock, timeline, "video", trackIndex, false)
+            lockedTracks[trackIndex] = true
+            print("[AutoSubs] Temporarily unlocked video track " .. trackIndex)
+        end
+    end
+    return lockedTracks
+end
+
+-- Restore the locks unlock_tracks removed. Never throws: a failure to re-lock
+-- must not turn a successful operation into a reported failure.
+local function relock_tracks(timeline, lockedTracks)
+    for trackIndex in pairs(lockedTracks) do
+        pcall(timeline.SetTrackLock, timeline, "video", trackIndex, true)
+        print("[AutoSubs] Re-locked video track " .. trackIndex)
+    end
+end
+
 local function new_caption_uuid()
     local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
     return (template:gsub("[xy]", function(c)
@@ -1649,6 +1685,17 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
         table.insert(errors, firstError)
     end
 
+    -- Writes to a clip on a locked track can be dropped by Resolve without
+    -- raising, which would report "31 restyled" against an untouched
+    -- timeline. Unlock exactly the tracks we are about to write to, and
+    -- restore every lock afterwards. Same reason AddSubtitles does this
+    -- before AppendToTimeline.
+    local trackSet = {}
+    for _, entry in ipairs(items) do
+        trackSet[entry.trackIndex] = true
+    end
+    local lockedTracks = unlock_tracks(timeline, trackSet)
+
     for _, entry in ipairs(items) do
         -- The WHOLE per-item body sits inside one pcall, including the id
         -- stamp. ensure_caption_id calls SetData, which can throw; leaving it
@@ -1713,6 +1760,8 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
         end
     end
 
+    relock_tracks(timeline, lockedTracks)
+
     return { restyled = restyled, failed = failed, errors = errors }
 end
 
@@ -1739,6 +1788,15 @@ function RestoreSnapshot(captions)
         end)
         if ok and id ~= nil and id ~= "" then live[id] = entry end
     end
+
+    -- Unlock only the tracks holding captions this restore will actually
+    -- touch, so a locked track can't turn the undo into a silent no-op.
+    local trackSet = {}
+    for _, snapshot in ipairs(captions) do
+        local entry = live[snapshot.captionId]
+        if entry ~= nil then trackSet[entry.trackIndex] = true end
+    end
+    local lockedTracks = unlock_tracks(timeline, trackSet)
 
     local restored, missing, failed, errors = 0, 0, 0, {}
     for _, snapshot in ipairs(captions) do
@@ -1782,6 +1840,8 @@ function RestoreSnapshot(captions)
         end
     end
 
+    relock_tracks(timeline, lockedTracks)
+
     return { restored = restored, missing = missing, failed = failed, errors = errors }
 end
 
@@ -1795,19 +1855,34 @@ function RemoveAllSubtitles(trackIndices)
 
     local items = iter_caption_items(timeline, trackIndices)
     local doomed = {}
+    local trackSet = {}
     for _, entry in ipairs(items) do
         table.insert(doomed, entry.item)
+        trackSet[entry.trackIndex] = true
     end
 
     if #doomed == 0 then
         return { removed = 0 }
     end
 
-    local ok, deleteErr = pcall(function()
-        timeline:DeleteClips(doomed)
+    -- DeleteClips returns false -- without throwing -- when Resolve refuses
+    -- the delete, most commonly because the track is locked. Unlock first
+    -- (the same dance AddSubtitles performs before AppendToTimeline), then
+    -- believe the return value rather than the absence of an exception.
+    local lockedTracks = unlock_tracks(timeline, trackSet)
+    local ok, deleted = pcall(function()
+        return timeline:DeleteClips(doomed)
     end)
+    relock_tracks(timeline, lockedTracks)
+
     if not ok then
-        return make_error("Failed to remove captions", tostring(deleteErr))
+        return make_error("Failed to remove captions", tostring(deleted))
+    end
+    if not deleted then
+        return make_error("Failed to remove captions",
+            string.format("Resolve refused to delete %d caption clip(s) (DeleteClips returned %s). " ..
+                "The track may be locked, or the timeline may be in a state that blocks edits.",
+                #doomed, tostring(deleted)))
     end
 
     return { removed = #doomed }
