@@ -295,6 +295,8 @@ export interface SnapshotEntry {
     id: string;
     label: string;
     createdAt: string;
-    operation: 'restyle' | 'generate' | 'remove-all';
+    // What the snapshot was taken *before*. Restoring an entry is itself a
+    // mutation and snapshots first, hence 'restore'.
+    operation: 'restyle' | 'generate' | 'remove-all' | 'restore';
     captions: CaptionSnapshot[];
 }

@@ -11,6 +11,7 @@ const OPERATION_LABELS: Record<SnapshotEntry['operation'], string> = {
     restyle: 'Before restyle',
     generate: 'Before generate',
     'remove-all': 'Before remove all',
+    restore: 'Before restore',
 };
 
 export function makeSnapshotEntry(

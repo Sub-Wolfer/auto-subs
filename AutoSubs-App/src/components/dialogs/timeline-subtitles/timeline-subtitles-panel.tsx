@@ -216,6 +216,25 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
             setBusy(true);
             setStatus(null);
             try {
+                // Restore is a mutation, so it snapshots first exactly like
+                // handleRestyle — the design guarantees no mutation happens
+                // without a persisted snapshot in front of it, and there is no
+                // redo, so restoring the wrong entry would otherwise be
+                // unrecoverable. Unscoped (no trackIndices): restore matches
+                // captions by id across every track, so the undo of it has to
+                // cover every track too.
+                const before = await snapshotCaptions();
+                if (before.failed > 0) {
+                    setStatus({
+                        tone: "error",
+                        message:
+                            `Refusing to restore: ${before.failed} caption(s) could not be snapshotted ` +
+                            `(${before.firstError ?? "unknown error"}). Undo would not cover them.`,
+                    });
+                    return;
+                }
+                addEntry(key, makeSnapshotEntry("restore", before.captions));
+
                 // Style only for "Before restyle" entries: the snapshot's
                 // `text` predates any transcript correction the user has made
                 // in Resolve since, and undoing a restyle must not undo those.
@@ -238,7 +257,7 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                 setBusy(false);
             }
         },
-        [refresh],
+        [refresh, key, addEntry],
     );
 
     return (
