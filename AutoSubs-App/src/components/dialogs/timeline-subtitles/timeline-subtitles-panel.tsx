@@ -29,7 +29,11 @@ interface TimelineSubtitlesPanelProps {
     timelineId: string;
 }
 
-type PanelStatus = { tone: "error" | "info"; message: string };
+type PanelStatus = { tone: "error" | "info"; message: string; errors?: string[] };
+
+// Server-side error arrays are already capped at 10 (see autosubs_core.lua);
+// the UI caps further so one bad batch can't fill the panel with text.
+const MAX_SHOWN_ERRORS = 3;
 
 // Shorts Bold is the preset this panel is built around (vertical export,
 // safe-zone aware), so it is the sensible default selection — not
@@ -157,8 +161,15 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
 
             const rules = { trackColors };
             const resolvedColors: Record<string, Rgb01> = {};
-            for (const c of captions) {
-                if (disabledTracks[c.trackIndex]) continue;
+            // Iterate snapshot.captions, not the component's `captions`
+            // state: the snapshot was just fetched fresh from Resolve, so it
+            // reflects the live timeline even if a caption was added
+            // elsewhere while this panel stayed mounted. `captions` can be
+            // stale, which would silently drop the caption's colour to the
+            // preset's raw fallback with no error. Already scoped to the
+            // enabled tracks via `snapshotCaptions(selectedTracks)`, so no
+            // `disabledTracks` filter is needed here.
+            for (const c of snapshot.captions) {
                 resolvedColors[c.captionId] = resolveCaptionColor({
                     captionId: c.captionId,
                     trackIndex: c.trackIndex,
@@ -177,7 +188,11 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
             );
             setStatus(
                 res.failed > 0
-                    ? { tone: "error", message: `${res.restyled} restyled, ${res.failed} failed.` }
+                    ? {
+                          tone: "error",
+                          message: `${res.restyled} restyled, ${res.failed} failed.`,
+                          errors: res.errors,
+                      }
                     : { tone: "info", message: `${res.restyled} caption(s) restyled.` },
             );
             await refresh();
@@ -190,8 +205,6 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
         selectedPreset,
         selectedTracks,
         trackColors,
-        captions,
-        disabledTracks,
         presetFallback,
         key,
         addEntry,
@@ -204,14 +217,14 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
             setStatus(null);
             try {
                 const res = await restoreSnapshot(entry.captions);
-                setStatus(
-                    res.missing > 0
-                        ? {
-                              tone: "error",
-                              message: `${res.restored} restored, ${res.missing} no longer on the timeline.`,
-                          }
-                        : { tone: "info", message: `${res.restored} caption(s) restored.` },
-                );
+                if (res.missing > 0 || res.failed > 0) {
+                    const parts = [`${res.restored} restored`];
+                    if (res.missing > 0) parts.push(`${res.missing} no longer on the timeline`);
+                    if (res.failed > 0) parts.push(`${res.failed} failed`);
+                    setStatus({ tone: "error", message: `${parts.join(", ")}.`, errors: res.errors });
+                } else {
+                    setStatus({ tone: "info", message: `${res.restored} caption(s) restored.` });
+                }
                 await refresh();
             } catch (err) {
                 setStatus({ tone: "error", message: `Restore failed: ${String(err)}` });
@@ -289,7 +302,21 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
             {status && (
                 <Alert variant={status.tone === "error" ? "destructive" : "default"}>
                     {status.tone === "error" && <AlertCircle className="size-4" />}
-                    <AlertDescription>{status.message}</AlertDescription>
+                    <AlertDescription>
+                        <p>{status.message}</p>
+                        {status.errors && status.errors.length > 0 && (
+                            <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-xs">
+                                {status.errors.slice(0, MAX_SHOWN_ERRORS).map((err, i) => (
+                                    <li key={i} className="break-words">
+                                        {err}
+                                    </li>
+                                ))}
+                                {status.errors.length > MAX_SHOWN_ERRORS && (
+                                    <li>+{status.errors.length - MAX_SHOWN_ERRORS} more</li>
+                                )}
+                            </ul>
+                        )}
+                    </AlertDescription>
                 </Alert>
             )}
         </div>

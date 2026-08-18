@@ -13,6 +13,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { GettingStartedOverlay } from "@/components/dialogs/getting-started-overlay"
 import { OnboardingTour } from "@/components/dialogs/onboarding-tour"
 import { WhatsNewDialog } from "@/components/dialogs/whats-new-dialog"
+import { TimelineSubtitlesEntryPoint } from "@/components/dialogs/timeline-subtitles/timeline-subtitles-entry-point"
 import { useSettingsStore } from "@/stores/settings-store"
 import { getVersion } from "@tauri-apps/api/app"
 import { EditorWorkspaceProviders } from "@/contexts/GlobalProvider"
@@ -358,6 +359,7 @@ function AppContentBody() {
           {showGettingStarted && <GettingStartedOverlay />}
           {showWhatsNew && <WhatsNewDialog />}
           {showTour && <OnboardingTour />}
+          <TimelineSubtitlesEntryPoint />
       </div>
     </TooltipProvider>
   )
