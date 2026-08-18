@@ -37,11 +37,22 @@ export function TimelineSubtitlesEntryPoint() {
 
     return (
         <>
+            {/*
+             * Bottom-left, not bottom-right: sonner's <Toaster/> (mounted in
+             * main.tsx with no `position` prop, so it uses sonner's own
+             * "bottom-right" default) renders at the same z-40 tier
+             * (ui/sonner.tsx) and after <App/> in the DOM, so a bottom-right
+             * button here would lose to any toast on screen — and
+             * ResolveContext's pushToTimeline (ResolveContext.tsx:151,156)
+             * fires exactly the toasts that appear while this button is
+             * visible. Checked every other `fixed` element in src/ before
+             * picking this corner; nothing else claims bottom-left.
+             */}
             <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="fixed bottom-4 right-4 z-40 gap-1.5 shadow-lg"
+                className="fixed bottom-4 left-4 z-40 gap-1.5 shadow-lg"
                 onClick={() => setOpen(true)}
             >
                 <Captions className="size-4" />
