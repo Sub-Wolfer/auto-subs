@@ -2582,7 +2582,11 @@ function StartServer()
                         local chunk, rerr, partial = client:receive(1024)
                         if chunk and #chunk > 0 then
                             request = request .. chunk
-                        elseif partial and #partial > 0 then
+                        -- LuaSocket's third return is a string on a partial read, but
+                        -- some paths hand back a number (bytes read). #partial then
+                        -- throws "attempt to get length of local 'partial'" and kills
+                        -- the request mid-flight -- reachable with a large POST body.
+                        elseif type(partial) == "string" and #partial > 0 then
                             request = request .. partial
                         else
                             -- timeout or other read error; stop accumulating
