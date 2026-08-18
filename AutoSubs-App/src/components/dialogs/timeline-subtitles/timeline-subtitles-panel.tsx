@@ -59,9 +59,10 @@ function rgb01ToHex({ r, g, b }: Rgb01): string {
  * a fill colour per video track, and applies a style preset to captions
  * already on the timeline without regenerating them.
  *
- * Every restyle snapshots first and persists that snapshot to history before
- * mutating anything, so a bad bulk restyle can be rolled back — scripted
- * Fusion changes don't reliably land on Resolve's own undo stack.
+ * Every mutation — restyle and restore alike — snapshots first and waits for
+ * that snapshot to reach disk before touching the timeline, so a bad bulk
+ * change can be rolled back: scripted Fusion changes don't reliably land on
+ * Resolve's own undo stack, and there is no redo.
  */
 export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubtitlesPanelProps) {
     const { presets } = usePresets();
@@ -111,6 +112,10 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
         try {
             // listCaptions returns { captions, failed, total, firstError } —
             // not a bare array. `failed` counts captions that could not be read.
+            // Its `captionId`s may be empty (listing is a read and does not
+            // stamp), so nothing here keys on them: the inventory only counts
+            // per track, and restyle builds its colour map from the snapshot,
+            // which does stamp.
             const res = await listCaptions();
             setCaptions(res.captions);
             setStatus(
