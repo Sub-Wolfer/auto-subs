@@ -20,6 +20,29 @@ async function getStore(path: string): Promise<Store> {
 }
 
 /**
+ * In-flight (or last failed) write per store file.
+ *
+ * Zustand's persist middleware calls `setItem` and drops the promise, so a
+ * failed write — disk full, permissions — is otherwise completely silent.
+ * Callers that must not proceed until the state is actually on disk (e.g. a
+ * snapshot that has to exist before the timeline is mutated) await
+ * `flushTauriStorage`. A successful write clears its entry; a failed one is
+ * kept so a flush that arrives after the failure still sees it, until the
+ * next write replaces it.
+ */
+const pendingWrites = new Map<string, Promise<void>>();
+
+/**
+ * Await the most recent write to `path`, rejecting with whatever the write
+ * failed with. Resolves immediately when there is nothing outstanding.
+ */
+export async function flushTauriStorage(path: string): Promise<void> {
+  const pending = pendingWrites.get(path);
+  if (!pending) return;
+  await pending;
+}
+
+/**
  * Check whether a key exists in the Tauri store file. Used during manual
  * rehydration to detect first-run (no persisted data) vs. returning users.
  */
@@ -56,10 +79,24 @@ export function createTauriStorage<T>(
       return { state: value, version: 0 } as StorageValue<T>;
     },
     setItem: async (_name, value) => {
-      const store = await getStore(path);
-      // Unwrap StorageValue — store only the state to preserve file format.
-      await store.set(key, value.state);
-      await store.save();
+      const write = (async () => {
+        const store = await getStore(path);
+        // Unwrap StorageValue — store only the state to preserve file format.
+        await store.set(key, value.state);
+        await store.save();
+      })();
+      pendingWrites.set(path, write);
+      try {
+        await write;
+        // Only drop it on success; see pendingWrites.
+        if (pendingWrites.get(path) === write) pendingWrites.delete(path);
+      } catch (error) {
+        // Swallowed here on purpose: persist voids this promise, so
+        // rethrowing would surface as an unhandled rejection with nowhere to
+        // report it. flushTauriStorage() is the one place the failure is
+        // observed; log it so it is never completely invisible.
+        console.error(`[tauri-storage] failed to persist ${path}:`, error);
+      }
     },
     removeItem: async () => {
       const store = await getStore(path);

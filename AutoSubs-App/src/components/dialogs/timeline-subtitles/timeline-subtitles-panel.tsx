@@ -19,7 +19,11 @@ import {
 } from "@/api/resolve-api";
 import { resolveCaptionColor, Rgb01 } from "@/lib/caption-colors";
 import { makeSnapshotEntry, historyKey, shouldRestoreText } from "@/lib/caption-snapshots";
-import { useCaptionHistoryStore } from "@/stores/caption-history-store";
+import {
+    useCaptionHistoryStore,
+    hydrateCaptionHistoryStore,
+    flushCaptionHistory,
+} from "@/stores/caption-history-store";
 import { usePresets } from "@/contexts/PresetsContext";
 import { TrackColorRow } from "./track-color-row";
 import { SnapshotHistoryList } from "./snapshot-history-list";
@@ -71,6 +75,37 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
     const key = historyKey(projectName, timelineId);
     const entries = useCaptionHistoryStore((s) => s.entriesByKey[key] ?? []);
     const addEntry = useCaptionHistoryStore((s) => s.addEntry);
+    const removeEntry = useCaptionHistoryStore((s) => s.removeEntry);
+
+    // The history store hydrates manually (skipHydration), so kick it off on
+    // mount to populate the list. Both mutating handlers also await the same
+    // shared promise before adding an entry, so an entry can never be added
+    // to an unhydrated store and then overwritten when the load lands.
+    useEffect(() => {
+        void hydrateCaptionHistoryStore();
+    }, []);
+
+    /**
+     * Persist `entry` and wait for it to actually reach disk. Returns an
+     * error message when the write failed, in which case the caller must not
+     * mutate the timeline: without a durable snapshot the operation has no
+     * recoverable undo. A snapshot that never landed is dropped again so the
+     * history list doesn't advertise an undo that isn't there.
+     */
+    const persistEntry = useCallback(
+        async (entry: SnapshotEntry): Promise<string | null> => {
+            await hydrateCaptionHistoryStore();
+            addEntry(key, entry);
+            try {
+                await flushCaptionHistory();
+                return null;
+            } catch (err) {
+                removeEntry(key, entry.id);
+                return `the undo snapshot could not be saved (${String(err)})`;
+            }
+        },
+        [key, addEntry, removeEntry],
+    );
 
     const refresh = useCallback(async () => {
         try {
@@ -157,7 +192,13 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                 });
                 return;
             }
-            addEntry(key, makeSnapshotEntry("restyle", snapshot.captions));
+            const persistError = await persistEntry(
+                makeSnapshotEntry("restyle", snapshot.captions),
+            );
+            if (persistError) {
+                setStatus({ tone: "error", message: `Refusing to restyle: ${persistError}.` });
+                return;
+            }
 
             const rules = { trackColors };
             const resolvedColors: Record<string, Rgb01> = {};
@@ -206,8 +247,7 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
         selectedTracks,
         trackColors,
         presetFallback,
-        key,
-        addEntry,
+        persistEntry,
         refresh,
     ]);
 
@@ -233,7 +273,13 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                     });
                     return;
                 }
-                addEntry(key, makeSnapshotEntry("restore", before.captions));
+                const persistError = await persistEntry(
+                    makeSnapshotEntry("restore", before.captions),
+                );
+                if (persistError) {
+                    setStatus({ tone: "error", message: `Refusing to restore: ${persistError}.` });
+                    return;
+                }
 
                 // Style only for "Before restyle" entries: the snapshot's
                 // `text` predates any transcript correction the user has made
@@ -257,7 +303,7 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
                 setBusy(false);
             }
         },
-        [refresh, key, addEntry],
+        [refresh, persistEntry],
     );
 
     return (
