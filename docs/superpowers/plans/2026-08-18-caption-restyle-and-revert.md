@@ -1270,14 +1270,17 @@ export const useCaptionHistoryStore = create<CaptionHistoryStore>()(
         }),
         {
             name: STORE_KEY,
-            storage: createTauriStorage(STORE_FILE),
+            storage: createTauriStorage<Pick<CaptionHistoryStore, 'entriesByKey'>>(
+                STORE_FILE,
+                STORE_KEY,
+            ),
             partialize: (state) => ({ entriesByKey: state.entriesByKey }),
         },
     ),
 );
 ```
 
-If `createTauriStorage` takes a different argument list than `(STORE_FILE)`, match the call in `settings-store.ts` exactly.
+`createTauriStorage<T>(path, key)` takes **two** arguments — see `tauri-storage.ts:47` and its use at `settings-store.ts:145`. It writes only `value.state` to disk, so the persisted file is `{ "history": { "entriesByKey": {...} } }`.
 
 - [ ] **Step 6: Typecheck and run the whole suite**
 
@@ -1399,7 +1402,7 @@ Create `timeline-subtitles-panel.tsx`. The restyle handler must follow the snaps
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { TimelineCaption, SnapshotEntry } from '@/types';
 import { listCaptions, snapshotCaptions, restyleSubtitles, restoreSnapshot } from '@/api/resolve-api';
-import { resolveCaptionColor, hexToRgb01, Rgb01 } from '@/lib/caption-colors';
+import { resolveCaptionColor, Rgb01 } from '@/lib/caption-colors';
 import { makeSnapshotEntry, historyKey } from '@/lib/caption-snapshots';
 import { useCaptionHistoryStore } from '@/stores/caption-history-store';
 import { usePresets } from '@/contexts/PresetsContext';
