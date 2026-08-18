@@ -359,8 +359,17 @@ export async function restyleSubtitles(
 // Re-applies a previously captured snapshot, matching captions by id. A
 // caption missing from the current timeline (deleted since the snapshot was
 // taken) is counted in `missing`, not `failed`.
-export async function restoreSnapshot(captions: CaptionSnapshot[]): Promise<RestoreSnapshotResult> {
-  const data = await callResolve({ func: 'RestoreSnapshot', captions });
+//
+// `restoreText` is opt-in and defaults to false: a snapshot taken before a
+// styling change must put back styling only, or restoring it would silently
+// revert transcript corrections the user made in Resolve since. Only
+// snapshots taken before an operation that removes or replaces captions
+// carry text worth restoring — see `shouldRestoreText`.
+export async function restoreSnapshot(
+  captions: CaptionSnapshot[],
+  restoreText = false,
+): Promise<RestoreSnapshotResult> {
+  const data = await callResolve({ func: 'RestoreSnapshot', captions, restoreText });
   throwIfError(data, 'RestoreSnapshot');
   return {
     restored: data.restored ?? 0,

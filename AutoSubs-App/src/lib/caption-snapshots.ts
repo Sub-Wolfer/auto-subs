@@ -27,6 +27,22 @@ export function makeSnapshotEntry(
     };
 }
 
+/**
+ * Whether restoring this snapshot should put its caption *text* back, not
+ * just its styling.
+ *
+ * Only true for snapshots taken before an operation that removes or replaces
+ * captions, where restore means recreating what was lost. A snapshot taken
+ * before a styling change must never rewrite text: the user may have fixed a
+ * typo in Resolve since it was captured, and silently reverting that
+ * correction is exactly the transcript data loss this feature exists to
+ * prevent. The Lua `RestoreSnapshot` endpoint defaults to style-only and
+ * takes this as an explicit `restoreText` flag.
+ */
+export function shouldRestoreText(operation: SnapshotEntry['operation']): boolean {
+    return operation === 'generate' || operation === 'remove-all';
+}
+
 /** Newest first, capped at `max`. Snapshots hold full styling for every
  *  caption, so an uncapped history would grow without bound. */
 export function pruneHistory(entries: SnapshotEntry[], max: number): SnapshotEntry[] {

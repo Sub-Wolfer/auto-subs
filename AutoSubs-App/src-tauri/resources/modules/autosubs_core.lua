@@ -1766,7 +1766,16 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
 end
 
 -- Re-apply a previously captured snapshot, matching by caption id.
-function RestoreSnapshot(captions)
+--
+-- restoreText is opt-in and defaults to false. A snapshot taken before a
+-- *styling* change must put back styling only: the user may have corrected a
+-- typo in Resolve since it was taken, and silently reverting that correction
+-- is exactly the transcript data loss this feature exists to prevent. Text is
+-- only meaningful to restore for snapshots taken before an operation that
+-- removed or replaced captions (recreation), so the caller -- which is the
+-- only layer that knows what the snapshot was taken before -- says so
+-- explicitly rather than Lua guessing.
+function RestoreSnapshot(captions, restoreText)
     if captions == nil or #captions == 0 then
         return make_error("Nothing to restore", "snapshot contained no captions")
     end
@@ -1825,7 +1834,7 @@ function RestoreSnapshot(captions)
                     end
                 end
 
-                if entry.template and snapshot.text ~= nil then
+                if restoreText and entry.template and snapshot.text ~= nil then
                     entry.template:SetInput("Text", snapshot.text)
                 end
             end)
@@ -2664,7 +2673,7 @@ function StartServer()
                                 body = safe_json(restyleResult)
                             elseif data.func == "RestoreSnapshot" then
                                 print("[AutoSubs Server] Restoring caption snapshot...")
-                                local restoreResult = RestoreSnapshot(data.captions)
+                                local restoreResult = RestoreSnapshot(data.captions, data.restoreText)
                                 body = safe_json(restoreResult)
                             elseif data.func == "RemoveAllSubtitles" then
                                 print("[AutoSubs Server] Removing captions...")

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { makeSnapshotEntry, pruneHistory, historyKey } from './caption-snapshots';
+import {
+    makeSnapshotEntry,
+    pruneHistory,
+    historyKey,
+    shouldRestoreText,
+} from './caption-snapshots';
 import { CaptionSnapshot, SnapshotEntry } from '@/types';
 
 const caption: CaptionSnapshot = {
@@ -55,6 +60,19 @@ describe('pruneHistory', () => {
 
     it('never returns more than max', () => {
         expect(pruneHistory(entries, 0)).toHaveLength(0);
+    });
+});
+
+describe('shouldRestoreText', () => {
+    it('never restores text for a styling snapshot', () => {
+        // Restoring a "Before restyle" entry must not roll back a transcript
+        // correction the user made in Resolve after the snapshot was taken.
+        expect(shouldRestoreText('restyle')).toBe(false);
+    });
+
+    it('restores text for snapshots that precede caption removal or replacement', () => {
+        expect(shouldRestoreText('remove-all')).toBe(true);
+        expect(shouldRestoreText('generate')).toBe(true);
     });
 });
 

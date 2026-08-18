@@ -18,7 +18,7 @@ import {
     restoreSnapshot,
 } from "@/api/resolve-api";
 import { resolveCaptionColor, Rgb01 } from "@/lib/caption-colors";
-import { makeSnapshotEntry, historyKey } from "@/lib/caption-snapshots";
+import { makeSnapshotEntry, historyKey, shouldRestoreText } from "@/lib/caption-snapshots";
 import { useCaptionHistoryStore } from "@/stores/caption-history-store";
 import { usePresets } from "@/contexts/PresetsContext";
 import { TrackColorRow } from "./track-color-row";
@@ -216,7 +216,13 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
             setBusy(true);
             setStatus(null);
             try {
-                const res = await restoreSnapshot(entry.captions);
+                // Style only for "Before restyle" entries: the snapshot's
+                // `text` predates any transcript correction the user has made
+                // in Resolve since, and undoing a restyle must not undo those.
+                const res = await restoreSnapshot(
+                    entry.captions,
+                    shouldRestoreText(entry.operation),
+                );
                 if (res.missing > 0 || res.failed > 0) {
                     const parts = [`${res.restored} restored`];
                     if (res.missing > 0) parts.push(`${res.missing} no longer on the timeline`);
