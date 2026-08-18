@@ -66,15 +66,39 @@ held would be lost exactly when a user most needs to undo.
 
 ### Macro changes
 
-Four keys appended to `InputKeys` in `autosubs-macro.setting`:
+The macro currently publishes `Font`, `Style`, `TextSize`, `TextPosition`, the
+Fill/Outline/Shadow/Highlight colours and the animation flags. It does **not**
+publish any layout input, so wrapping cannot be expressed today.
 
-```
-"LayoutType", "Wrap", "LayoutWidth", "LayoutHeight"
+Two edits are required in `autosubs-macro.setting`, not one:
+
+1. **Publish four inputs** from the inner Text+ node, in the macro's `Inputs`
+   block, following the existing `InstanceInput` pattern:
+
+```lua
+Wrap = InstanceInput {
+    SourceOp = "Template",
+    Source = "Wrap",
+    Page = "Text",
+},
 ```
 
-`GetInputValues` iterates `InputKeys` generically and `SetInputValues` iterates the
-settings table, so this addition requires no change to either helper. Presets that
-predate the change simply omit the keys and inherit macro defaults.
+   ...and likewise for `LayoutType`, `LayoutWidth`, `LayoutHeight`.
+
+2. **Append the same four names to `InputKeys`** so they round-trip when a preset
+   is captured from the Inspector.
+
+Both are needed and they do different jobs: `InputKeys` governs *capture*
+(`GetInputValues` iterates it), while publishing governs *apply* — `SetInputValues`
+calls `tool:SetInput(key, value)` on the macro, which silently does nothing for an
+input the macro does not expose. Neither helper function itself needs changing, and
+presets predating this addition simply omit the keys and inherit macro defaults.
+
+Shipping a macro change also requires regenerating `caption-bin.drb` (via
+`Resolve-Integration/scripts/AutoSubs - Update Caption Template.lua`, which
+`npm run setup-resolve` generates) and bumping
+`resources/modules/caption_template_version.lua`. That step involves manual
+interaction in Resolve and cannot be fully scripted.
 
 `LayoutType: 1` selects Fusion's Frame layout; `Wrap: 1` enables wrapping within
 `LayoutWidth` (a 0..1 fraction of frame width). Together these bound caption width
