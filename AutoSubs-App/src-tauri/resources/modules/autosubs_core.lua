@@ -1603,6 +1603,70 @@ function SnapshotCaptions(trackIndices)
     }
 end
 
+-- Re-apply styling to captions already on the timeline.
+--
+-- macroSettings is the preset body. resolvedColors optionally overrides the
+-- fill colour per caption id; the app resolves precedence before calling.
+function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
+    if macroSettings == nil or next(macroSettings) == nil then
+        return make_error("Nothing to apply", "macroSettings was empty")
+    end
+
+    refresh_project()
+    local timeline = project:GetCurrentTimeline()
+    if not timeline then
+        return make_error("No timeline", "no current timeline is open")
+    end
+
+    -- Mirrors ListCaptions/SnapshotCaptions: iter_caption_items's scan-level
+    -- failed/firstError are folded into our own tally rather than discarded,
+    -- so a caption that errored while being scanned is still counted.
+    local items, failed, firstError = iter_caption_items(timeline, trackIndices)
+
+    local restyled, errors = 0, {}
+    if firstError ~= nil then
+        table.insert(errors, firstError)
+    end
+
+    for _, entry in ipairs(items) do
+        -- The WHOLE per-item body sits inside one pcall, including the id
+        -- stamp. ensure_caption_id calls SetData, which can throw; leaving it
+        -- outside would let one bad caption abort the entire restyle and
+        -- discard every caption already processed. Mirrors apply_subtitle_text.
+        local ok, applyErr = pcall(function()
+            local captionId = ensure_caption_id(entry.autosubsTool)
+
+            -- Shallow copy so a per-caption colour never leaks into the next one.
+            local settings = {}
+            for k, v in pairs(macroSettings) do settings[k] = v end
+
+            local color = resolvedColors and resolvedColors[captionId]
+            if color then
+                settings.FillColorRed = color.r
+                settings.FillColorGreen = color.g
+                settings.FillColorBlue = color.b
+            end
+
+            local setter = entry.autosubsTool:GetData("SetInputValues")
+            if not setter or setter == "" then
+                error("macro is missing SetInputValues helper")
+            end
+            loadstring(setter)()(entry.comp, entry.autosubsTool, settings)
+        end)
+
+        if ok then
+            restyled = restyled + 1
+        else
+            failed = failed + 1
+            if #errors < 10 then
+                table.insert(errors, tostring(applyErr))
+            end
+        end
+    end
+
+    return { restyled = restyled, failed = failed, errors = errors }
+end
+
 -- Applies subtitle text + styling to each appended timeline item. Instead of
 -- spamming one print per failed clip, we aggregate failures and return a
 -- summary so the caller can surface a single clean error.
@@ -2372,6 +2436,11 @@ function StartServer()
                                 print("[AutoSubs Server] Snapshotting captions...")
                                 local snapshotResult = SnapshotCaptions(data.trackIndices)
                                 body = safe_json(snapshotResult)
+                            elseif data.func == "RestyleSubtitles" then
+                                print("[AutoSubs Server] Restyling captions...")
+                                local restyleResult = RestyleSubtitles(data.trackIndices,
+                                    data.macroSettings, data.resolvedColors)
+                                body = safe_json(restyleResult)
                             elseif data.func == "Exit" then
                                 body = safe_json({ message = "Server shutting down" })
                                 quitServer = true
