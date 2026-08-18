@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getSubtitleDocumentPath, getAudioExportDir } from '@/utils/file-utils';
-import { Speaker, Template } from '@/types';
+import { CaptionSnapshot, Speaker, Template, TimelineCaption } from '@/types';
+import { Rgb01 } from '@/lib/caption-colors';
 
 /**
  * Error thrown when the AutoSubs Lua server (inside Resolve) reports a failure
@@ -273,4 +274,106 @@ export async function capturePresetSettings(): Promise<{
 // no active session.
 export async function cancelPresetEdit(): Promise<{ ok?: true; error?: string }> {
   return callResolve({ func: 'CancelPresetEdit' });
+}
+
+// `ListCaptions`/`SnapshotCaptions` scan every AutoSubs caption item in scope
+// but never abort on a single bad item: a caption whose Fusion state can't be
+// read is counted in `failed` (and its message in `firstError`) rather than
+// silently dropped or failing the whole call. Surface those alongside the
+// list so a caller can tell "3 captions" from "3 captions, 2 unreadable".
+export interface CaptionListResult {
+  captions: TimelineCaption[];
+  failed: number;
+  total: number;
+  firstError?: string;
+}
+
+export interface CaptionSnapshotResult {
+  captions: CaptionSnapshot[];
+  failed: number;
+  total: number;
+  firstError?: string;
+}
+
+export interface RestyleResult {
+  restyled: number;
+  failed: number;
+  errors: string[];
+}
+
+export interface RestoreSnapshotResult {
+  restored: number;
+  missing: number;
+  failed: number;
+  errors: string[];
+}
+
+// Lists every AutoSubs caption item currently in scope (all video tracks, or
+// only `trackIndices` when given), without reading their macro styling.
+export async function listCaptions(trackIndices?: number[]): Promise<CaptionListResult> {
+  const data = await callResolve({ func: 'ListCaptions', trackIndices });
+  throwIfError(data, 'ListCaptions');
+  return {
+    captions: Array.isArray(data.captions) ? data.captions : [],
+    failed: data.failed ?? 0,
+    total: data.total ?? 0,
+    firstError: typeof data.firstError === 'string' ? data.firstError : undefined,
+  };
+}
+
+// Captures the full styling state (macro settings) of every caption in
+// scope, for later restoration via `restoreSnapshot`.
+export async function snapshotCaptions(trackIndices?: number[]): Promise<CaptionSnapshotResult> {
+  const data = await callResolve({ func: 'SnapshotCaptions', trackIndices });
+  throwIfError(data, 'SnapshotCaptions');
+  return {
+    captions: Array.isArray(data.captions) ? data.captions : [],
+    failed: data.failed ?? 0,
+    total: data.total ?? 0,
+    firstError: typeof data.firstError === 'string' ? data.firstError : undefined,
+  };
+}
+
+// Re-applies `macroSettings` to every caption in scope. `resolvedColors`
+// optionally overrides the fill colour per caption id, taking precedence
+// over whatever colour `macroSettings` carries.
+export async function restyleSubtitles(
+  macroSettings: Record<string, unknown>,
+  trackIndices?: number[],
+  resolvedColors?: Record<string, Rgb01>,
+): Promise<RestyleResult> {
+  const data = await callResolve({
+    func: 'RestyleSubtitles',
+    trackIndices,
+    macroSettings,
+    resolvedColors,
+  });
+  throwIfError(data, 'RestyleSubtitles');
+  return {
+    restyled: data.restyled ?? 0,
+    failed: data.failed ?? 0,
+    errors: Array.isArray(data.errors) ? data.errors : [],
+  };
+}
+
+// Re-applies a previously captured snapshot, matching captions by id. A
+// caption missing from the current timeline (deleted since the snapshot was
+// taken) is counted in `missing`, not `failed`.
+export async function restoreSnapshot(captions: CaptionSnapshot[]): Promise<RestoreSnapshotResult> {
+  const data = await callResolve({ func: 'RestoreSnapshot', captions });
+  throwIfError(data, 'RestoreSnapshot');
+  return {
+    restored: data.restored ?? 0,
+    missing: data.missing ?? 0,
+    failed: data.failed ?? 0,
+    errors: Array.isArray(data.errors) ? data.errors : [],
+  };
+}
+
+// Deletes every AutoSubs caption item in scope. Callers should snapshot
+// first if the removal needs to be reversible.
+export async function removeAllSubtitles(trackIndices?: number[]): Promise<{ removed: number }> {
+  const data = await callResolve({ func: 'RemoveAllSubtitles', trackIndices });
+  throwIfError(data, 'RemoveAllSubtitles');
+  return { removed: data.removed ?? 0 };
 }
