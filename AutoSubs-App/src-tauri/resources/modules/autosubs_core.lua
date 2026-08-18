@@ -1515,20 +1515,31 @@ function ListCaptions(trackIndices)
 
     local items, failed, firstError = iter_caption_items(timeline, trackIndices)
 
+    -- Wrap each caption's whole read (id stamping + frame reads + text
+    -- read) in one pcall, mirroring apply_subtitle_text. Id stamping calls
+    -- SetData, a mutating Fusion API call that can throw; without this the
+    -- N-1 captions already collected would be discarded along with caption
+    -- N's failure instead of being counted and returned.
     local captions = {}
     for _, entry in ipairs(items) do
-        local text = ""
-        if entry.template then
-            local ok, value = pcall(function() return entry.template:GetInput("Text") end)
-            if ok and value ~= nil then text = value end
+        local ok, err = pcall(function()
+            local text = ""
+            if entry.template then
+                local value = entry.template:GetInput("Text")
+                if value ~= nil then text = value end
+            end
+            table.insert(captions, {
+                captionId = ensure_caption_id(entry.autosubsTool),
+                trackIndex = entry.trackIndex,
+                startFrame = entry.item:GetStart(),
+                endFrame = entry.item:GetEnd(),
+                text = text,
+            })
+        end)
+        if not ok then
+            failed = failed + 1
+            if firstError == nil then firstError = tostring(err) end
         end
-        table.insert(captions, {
-            captionId = ensure_caption_id(entry.autosubsTool),
-            trackIndex = entry.trackIndex,
-            startFrame = entry.item:GetStart(),
-            endFrame = entry.item:GetEnd(),
-            text = text,
-        })
     end
     return {
         captions = captions,
