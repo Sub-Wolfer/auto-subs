@@ -1667,6 +1667,88 @@ function RestyleSubtitles(trackIndices, macroSettings, resolvedColors)
     return { restyled = restyled, failed = failed, errors = errors }
 end
 
+-- Re-apply a previously captured snapshot, matching by caption id.
+function RestoreSnapshot(captions)
+    if captions == nil or #captions == 0 then
+        return make_error("Nothing to restore", "snapshot contained no captions")
+    end
+
+    refresh_project()
+    local timeline = project:GetCurrentTimeline()
+    if not timeline then
+        return make_error("No timeline", "no current timeline is open")
+    end
+
+    -- Index live captions by id so restore is O(n), not O(n^2).
+    -- GetData can throw, so each read is guarded — one unreadable caption must
+    -- not abort the whole restore.
+    local items = iter_caption_items(timeline, nil)
+    local live = {}
+    for _, entry in ipairs(items) do
+        local ok, id = pcall(function()
+            return entry.autosubsTool:GetData("CaptionId")
+        end)
+        if ok and id ~= nil and id ~= "" then live[id] = entry end
+    end
+
+    local restored, missing, failed, errors = 0, 0, 0, {}
+    for _, snapshot in ipairs(captions) do
+        local entry = live[snapshot.captionId]
+        if entry == nil then
+            missing = missing + 1
+        else
+            local ok, applyErr = pcall(function()
+                local setter = entry.autosubsTool:GetData("SetInputValues")
+                if not setter or setter == "" then
+                    error("macro is missing SetInputValues helper")
+                end
+                loadstring(setter)()(entry.comp, entry.autosubsTool, snapshot.macroSettings)
+                if entry.template and snapshot.text ~= nil then
+                    entry.template:SetInput("Text", snapshot.text)
+                end
+            end)
+            if ok then
+                restored = restored + 1
+            else
+                failed = failed + 1
+                if #errors < 10 then
+                    table.insert(errors, tostring(snapshot.captionId) .. ": " .. tostring(applyErr))
+                end
+            end
+        end
+    end
+
+    return { restored = restored, missing = missing, failed = failed, errors = errors }
+end
+
+-- Delete every AutoSubs caption in scope. The app must snapshot first.
+function RemoveAllSubtitles(trackIndices)
+    refresh_project()
+    local timeline = project:GetCurrentTimeline()
+    if not timeline then
+        return make_error("No timeline", "no current timeline is open")
+    end
+
+    local items = iter_caption_items(timeline, trackIndices)
+    local doomed = {}
+    for _, entry in ipairs(items) do
+        table.insert(doomed, entry.item)
+    end
+
+    if #doomed == 0 then
+        return { removed = 0 }
+    end
+
+    local ok, deleteErr = pcall(function()
+        timeline:DeleteClips(doomed)
+    end)
+    if not ok then
+        return make_error("Failed to remove captions", tostring(deleteErr))
+    end
+
+    return { removed = #doomed }
+end
+
 -- Applies subtitle text + styling to each appended timeline item. Instead of
 -- spamming one print per failed clip, we aggregate failures and return a
 -- summary so the caller can surface a single clean error.
@@ -2441,6 +2523,14 @@ function StartServer()
                                 local restyleResult = RestyleSubtitles(data.trackIndices,
                                     data.macroSettings, data.resolvedColors)
                                 body = safe_json(restyleResult)
+                            elseif data.func == "RestoreSnapshot" then
+                                print("[AutoSubs Server] Restoring caption snapshot...")
+                                local restoreResult = RestoreSnapshot(data.captions)
+                                body = safe_json(restoreResult)
+                            elseif data.func == "RemoveAllSubtitles" then
+                                print("[AutoSubs Server] Removing captions...")
+                                local removeResult = RemoveAllSubtitles(data.trackIndices)
+                                body = safe_json(removeResult)
                             elseif data.func == "Exit" then
                                 body = safe_json({ message = "Server shutting down" })
                                 quitServer = true
