@@ -1549,6 +1549,60 @@ function ListCaptions(trackIndices)
     }
 end
 
+-- Capture the full styling state of every caption in scope. The app persists
+-- the result; Lua keeps no history of its own.
+function SnapshotCaptions(trackIndices)
+    refresh_project()
+    local timeline = project:GetCurrentTimeline()
+    if not timeline then
+        return make_error("No timeline", "no current timeline is open")
+    end
+
+    local items, failed, firstError = iter_caption_items(timeline, trackIndices)
+
+    -- Wrap each caption's whole read (id stamping + frame reads + text read +
+    -- macro settings read) in one pcall, mirroring ListCaptions and
+    -- apply_subtitle_text. GetData/GetInputValues and id stamping's SetData
+    -- are both mutating/reflective Fusion calls that can throw; without this
+    -- the N-1 captions already collected would be discarded along with
+    -- caption N's failure instead of being counted and returned.
+    local captions = {}
+    for _, entry in ipairs(items) do
+        local ok, err = pcall(function()
+            local getter = entry.autosubsTool:GetData("GetInputValues")
+            if not getter or getter == "" then
+                error("macro is missing GetInputValues helper")
+            end
+            local settings = loadstring(getter)()(entry.autosubsTool)
+
+            local text = ""
+            if entry.template then
+                local value = entry.template:GetInput("Text")
+                if value ~= nil then text = value end
+            end
+
+            table.insert(captions, {
+                captionId = ensure_caption_id(entry.autosubsTool),
+                trackIndex = entry.trackIndex,
+                startFrame = entry.item:GetStart(),
+                endFrame = entry.item:GetEnd(),
+                text = text,
+                macroSettings = settings or {},
+            })
+        end)
+        if not ok then
+            failed = failed + 1
+            if firstError == nil then firstError = tostring(err) end
+        end
+    end
+    return {
+        captions = captions,
+        failed = failed,
+        total = #captions + failed,
+        firstError = firstError,
+    }
+end
+
 -- Applies subtitle text + styling to each appended timeline item. Instead of
 -- spamming one print per failed clip, we aggregate failures and return a
 -- summary so the caller can surface a single clean error.
@@ -2314,6 +2368,10 @@ function StartServer()
                                 print("[AutoSubs Server] Listing captions...")
                                 local captionsResult = ListCaptions(data.trackIndices)
                                 body = safe_json(captionsResult)
+                            elseif data.func == "SnapshotCaptions" then
+                                print("[AutoSubs Server] Snapshotting captions...")
+                                local snapshotResult = SnapshotCaptions(data.trackIndices)
+                                body = safe_json(snapshotResult)
                             elseif data.func == "Exit" then
                                 body = safe_json({ message = "Server shutting down" })
                                 quitServer = true
