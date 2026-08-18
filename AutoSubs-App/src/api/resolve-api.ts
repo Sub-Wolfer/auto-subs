@@ -66,6 +66,7 @@ function throwIfError(data: any, fallbackFunc?: string): void {
 async function callResolve(
   payload: Record<string, unknown>,
   timeoutSecs?: number,
+  timeoutNote?: string,
 ): Promise<any> {
   const invokePromise = invoke<string>('resolve_bridge', {
     args: { payload, timeoutSecs },
@@ -75,7 +76,13 @@ async function callResolve(
   if (timeoutSecs && timeoutSecs > 0) {
     const timeoutPromise = new Promise<string>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Resolve did not respond within ${timeoutSecs} seconds`)),
+        () =>
+          reject(
+            new Error(
+              `Resolve did not respond within ${timeoutSecs} seconds.` +
+                (timeoutNote ? ` ${timeoutNote}` : ''),
+            ),
+          ),
         timeoutSecs * 1000,
       ),
     );
@@ -308,10 +315,34 @@ export interface RestoreSnapshotResult {
   errors: string[];
 }
 
+// The bulk caption endpoints walk every caption on the timeline and do real
+// per-caption work in Resolve, so the bridge's 180 s default (see
+// src-tauri/src/resolve_bridge.rs) is not a safe ceiling for them. Restyle and
+// restore compile the macro's SetInputValues helper per caption — which itself
+// compiles SetAnimations and UpdateHighlight — and rebuild keyframes, so a few
+// hundred captions can run well past three minutes. Reads are cheaper but
+// still O(captions) round trips into Fusion.
+const CAPTION_READ_TIMEOUT_SECS = 300;
+const CAPTION_MUTATE_TIMEOUT_SECS = 900;
+
+// A timeout is not a rollback: Lua keeps going inside Resolve after the
+// bridge stops waiting, so retrying immediately can double-apply against a
+// half-mutated comp.
+const CAPTION_MUTATE_TIMEOUT_NOTE =
+  'The operation may still be running in Resolve — check the timeline before retrying.';
+
 // Lists every AutoSubs caption item currently in scope (all video tracks, or
 // only `trackIndices` when given), without reading their macro styling.
+//
+// `captionId` is empty for captions that have never been stamped: listing is
+// a read and deliberately does not write ids (see ListCaptions in
+// autosubs_core.lua). Callers must not key on the returned ids — take a
+// snapshot first, which stamps.
 export async function listCaptions(trackIndices?: number[]): Promise<CaptionListResult> {
-  const data = await callResolve({ func: 'ListCaptions', trackIndices });
+  const data = await callResolve(
+    { func: 'ListCaptions', trackIndices },
+    CAPTION_READ_TIMEOUT_SECS,
+  );
   throwIfError(data, 'ListCaptions');
   return {
     captions: Array.isArray(data.captions) ? data.captions : [],
@@ -324,7 +355,10 @@ export async function listCaptions(trackIndices?: number[]): Promise<CaptionList
 // Captures the full styling state (macro settings) of every caption in
 // scope, for later restoration via `restoreSnapshot`.
 export async function snapshotCaptions(trackIndices?: number[]): Promise<CaptionSnapshotResult> {
-  const data = await callResolve({ func: 'SnapshotCaptions', trackIndices });
+  const data = await callResolve(
+    { func: 'SnapshotCaptions', trackIndices },
+    CAPTION_READ_TIMEOUT_SECS,
+  );
   throwIfError(data, 'SnapshotCaptions');
   return {
     captions: Array.isArray(data.captions) ? data.captions : [],
@@ -342,12 +376,16 @@ export async function restyleSubtitles(
   trackIndices?: number[],
   resolvedColors?: Record<string, Rgb01>,
 ): Promise<RestyleResult> {
-  const data = await callResolve({
-    func: 'RestyleSubtitles',
-    trackIndices,
-    macroSettings,
-    resolvedColors,
-  });
+  const data = await callResolve(
+    {
+      func: 'RestyleSubtitles',
+      trackIndices,
+      macroSettings,
+      resolvedColors,
+    },
+    CAPTION_MUTATE_TIMEOUT_SECS,
+    CAPTION_MUTATE_TIMEOUT_NOTE,
+  );
   throwIfError(data, 'RestyleSubtitles');
   return {
     restyled: data.restyled ?? 0,
@@ -369,7 +407,11 @@ export async function restoreSnapshot(
   captions: CaptionSnapshot[],
   restoreText = false,
 ): Promise<RestoreSnapshotResult> {
-  const data = await callResolve({ func: 'RestoreSnapshot', captions, restoreText });
+  const data = await callResolve(
+    { func: 'RestoreSnapshot', captions, restoreText },
+    CAPTION_MUTATE_TIMEOUT_SECS,
+    CAPTION_MUTATE_TIMEOUT_NOTE,
+  );
   throwIfError(data, 'RestoreSnapshot');
   return {
     restored: data.restored ?? 0,
@@ -382,7 +424,11 @@ export async function restoreSnapshot(
 // Deletes every AutoSubs caption item in scope. Callers should snapshot
 // first if the removal needs to be reversible.
 export async function removeAllSubtitles(trackIndices?: number[]): Promise<{ removed: number }> {
-  const data = await callResolve({ func: 'RemoveAllSubtitles', trackIndices });
+  const data = await callResolve(
+    { func: 'RemoveAllSubtitles', trackIndices },
+    CAPTION_MUTATE_TIMEOUT_SECS,
+    CAPTION_MUTATE_TIMEOUT_NOTE,
+  );
   throwIfError(data, 'RemoveAllSubtitles');
   return { removed: data.removed ?? 0 };
 }
