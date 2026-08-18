@@ -1490,7 +1490,12 @@ local function iter_caption_items(timeline, trackIndices)
                         item = item,
                         comp = comp,
                         autosubsTool = autosubsTool,
-                        template = comp:FindTool("Template"),
+                        -- Same lookup the proven generation path uses (see
+                        -- apply_subtitle_text). FindTool matches by tool NAME,
+                        -- which a user can rename in the Fusion page; without
+                        -- the ID fallback such a caption silently reports
+                        -- text = "" and never receives layout inputs.
+                        template = comp:FindTool("Template") or comp:FindToolByID("TextPlus"),
                         trackIndex = trackIndex,
                     }
                 end)
@@ -1515,11 +1520,18 @@ function ListCaptions(trackIndices)
 
     local items, failed, firstError = iter_caption_items(timeline, trackIndices)
 
-    -- Wrap each caption's whole read (id stamping + frame reads + text
-    -- read) in one pcall, mirroring apply_subtitle_text. Id stamping calls
-    -- SetData, a mutating Fusion API call that can throw; without this the
-    -- N-1 captions already collected would be discarded along with caption
-    -- N's failure instead of being counted and returned.
+    -- ListCaptions is a READ. It deliberately does not stamp ids: the panel
+    -- calls it on mount and after every operation, and stamping here would
+    -- SetData a UUID onto every caption in the project just for rendering an
+    -- inventory, dirtying the user's project from a read-shaped action. Only
+    -- the mutating endpoints (SnapshotCaptions, RestyleSubtitles) stamp, per
+    -- the design's "Identity stamping" section. An unstamped caption reports
+    -- captionId = "" here; callers must not key on it.
+    --
+    -- Each caption's whole read still sits in one pcall, mirroring
+    -- apply_subtitle_text: GetData/GetInput are Fusion calls that can throw,
+    -- and without this the N-1 captions already collected would be discarded
+    -- along with caption N's failure instead of being counted and returned.
     local captions = {}
     for _, entry in ipairs(items) do
         local ok, err = pcall(function()
@@ -1528,8 +1540,10 @@ function ListCaptions(trackIndices)
                 local value = entry.template:GetInput("Text")
                 if value ~= nil then text = value end
             end
+            local captionId = entry.autosubsTool:GetData("CaptionId")
+            if type(captionId) ~= "string" then captionId = "" end
             table.insert(captions, {
-                captionId = ensure_caption_id(entry.autosubsTool),
+                captionId = captionId,
                 trackIndex = entry.trackIndex,
                 startFrame = entry.item:GetStart(),
                 endFrame = entry.item:GetEnd(),
