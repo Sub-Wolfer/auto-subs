@@ -1043,7 +1043,12 @@ end
 local function sanitize_track_index(timeline, trackIndex, markIn, markOut)
     -- Only create a new track if trackIndex is explicitly "0" (new track), empty/nil, or invalid
     -- Respect user's track selection regardless of whether the track is empty
-    if trackIndex == "0" or trackIndex == "" or trackIndex == nil or tonumber(trackIndex) > timeline:GetTrackCount("video") then
+    -- Accept a numeric 0 as well as the string "0": callers outside the UI send JSON
+    -- numbers, which previously fell through to an invalid track index and produced
+    -- clips with no Fusion composition.
+    local requested = tonumber(trackIndex)
+    if trackIndex == nil or trackIndex == "" or requested == nil or requested < 1
+        or requested > timeline:GetTrackCount("video") then
         trackIndex = timeline:GetTrackCount("video") + 1
         timeline:AddTrack("video")
     end
@@ -1062,7 +1067,11 @@ local function set_speaker_styling(speaker, tool, isAnimated)
     if color == nil then return end
 
     -- Update color for that style e.g. Fill or Outline
-    for key, value in ipairs(color) do
+    -- pairs, not ipairs: hex_to_rgb returns { Red=, Green=, Blue= } -- a string-keyed
+    -- table with no [1]/[2]/[3], so ipairs iterated nothing and the speaker colour
+    -- was silently never applied. pairs yields Red/Green/Blue, which is exactly what
+    -- the concatenations below expect (FillColorRed / Red1).
+    for key, value in pairs(color) do
         if isAnimated then
             tool:SetInput(speaker.style .. "Color" .. key, value)
         else
