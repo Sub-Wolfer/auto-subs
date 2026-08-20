@@ -1,6 +1,6 @@
 import * as React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PanelRight, RotateCcw } from "lucide-react";
+import { Captions, PanelRight, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { platform } from "@tauri-apps/plugin-os";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { IntegrationStatus } from "@/components/layout/integration-status";
+import { useIntegration } from "@/contexts/IntegrationContext";
 import { useUpdateStatus } from "@/hooks/use-update-status";
+import { useTimelineSubtitlesStore } from "@/stores/timeline-subtitles-store";
 import { SettingsDropdown } from "./settings-dropdown";
 
 interface TranscriptionHeaderProps {
@@ -102,6 +104,8 @@ export function TranscriptionHeader({
   const { t } = useTranslation();
   const [isMacOs, setIsMacOs] = React.useState(true);
   const { phase, percentage, version } = useUpdateStatus();
+  const { selectedIntegration } = useIntegration();
+  const openTimelineSubtitles = useTimelineSubtitlesStore((s) => s.setOpen);
 
   React.useEffect(() => {
     try {
@@ -143,6 +147,22 @@ export function TranscriptionHeader({
           data-tauri-drag-region={isMacOs ? "false" : undefined}
         >
           <SettingsDropdown />
+          {selectedIntegration === "davinci" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Timeline Subtitles"
+                  onClick={() => openTimelineSubtitles(true)}
+                >
+                  <Captions />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Timeline Subtitles</TooltipContent>
+            </Tooltip>
+          )}
           {onViewSubtitles && !isSubtitleViewerOpen && (
             <Tooltip>
               <TooltipTrigger asChild>

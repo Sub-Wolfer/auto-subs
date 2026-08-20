@@ -45,6 +45,14 @@ const MAX_SHOWN_ERRORS = 3;
 // preset and unrelated to this workflow.
 const DEFAULT_PANEL_PRESET_ID = "builtin:shorts-bold";
 
+// Module scope on purpose. Zustand v5's `useStore` is a bare pass-through to
+// `useSyncExternalStore` with no result caching, so a selector must return a
+// referentially stable value when nothing changed. Writing `?? []` inline
+// allocates a fresh array on every call, React sees the snapshot "change" on
+// every render, and it re-renders until it throws "Maximum update depth
+// exceeded" — which, with no timeline history yet, is every first open.
+const NO_ENTRIES: SnapshotEntry[] = [];
+
 /** Convert Fusion's 0..1 float channels back to `#RRGGBB`, for swatch display only. */
 function rgb01ToHex({ r, g, b }: Rgb01): string {
     const toHex = (channel: number) =>
@@ -74,7 +82,7 @@ export function TimelineSubtitlesPanel({ projectName, timelineId }: TimelineSubt
     const [status, setStatus] = useState<PanelStatus | null>(null);
 
     const key = historyKey(projectName, timelineId);
-    const entries = useCaptionHistoryStore((s) => s.entriesByKey[key] ?? []);
+    const entries = useCaptionHistoryStore((s) => s.entriesByKey[key] ?? NO_ENTRIES);
     const addEntry = useCaptionHistoryStore((s) => s.addEntry);
     const removeEntry = useCaptionHistoryStore((s) => s.removeEntry);
     // Until this flips, `entries` is empty because nothing has been loaded
